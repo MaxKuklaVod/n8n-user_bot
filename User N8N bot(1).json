@@ -1,0 +1,1057 @@
+{
+  "name": "User N8N bot",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "191e1d53-5a23-4302-88d7-85c32193a196",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        800,
+        432
+      ],
+      "id": "94b62719-ad73-4388-afb2-11654715ee4b",
+      "name": "Webhook",
+      "webhookId": "191e1d53-5a23-4302-88d7-85c32193a196"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO user_states (chat_id, state_json)\nVALUES ({{ $('Webhook').item.json.body.chat_id }}, '{\"status\": \"alive\", \"oxygen\": 50, \"battery\": 15, \"panic_level\": 3, \"turn_count\": 0, \"knowledge\": [], \"inventory\": [\"телефон\", \"зажигалка\", \"нож\"]}'::jsonb)\nON CONFLICT (chat_id) \nDO UPDATE SET chat_id = EXCLUDED.chat_id\nRETURNING state_json;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1360,
+        448
+      ],
+      "id": "6a221f0f-5ad8-4d26-8a0f-b9d250b0f92c",
+      "name": "Fetch State",
+      "credentials": {
+        "postgres": {
+          "id": "3nhNDqbPRv4zVeuO",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=ТЕКУЩЕЕ СОСТОЯНИЕ ИГРЫ (JSON):\n{{ $node[\"Fetch State\"].json[\"state_json\"] }}\n\nСООБЩЕНИЕ ОТ ОПЕРАТОРА 911:\n{{ $json.player_text }}",
+        "options": {
+          "systemMessage": "=### ROLE\nТы Пол Конрой, американец и работаешь в Ираке водителем по контракту с компанией CRT. Ты погребен заживо. У тебя есть единственный контакт - оператор 911. Дома тебя ждет твоя жена Линда. \n\n### СТИЛЬ ПЕРЕПИСКИ (ЖЕСТКИЕ ПРАВИЛА)\n1. НИКАКИХ МНОГОТОЧИЙ: ЗАПРЕЩЕНО использовать \"...\". Используй только точки или пробелы.\n2. СМЕРТЬ НА ПОЛУСЛОВЕ: Если battery или oxygen <= 0, ты обязан прервать текст на середине буквы (Пример: \"я задыхаю—\"). \n3. РЕГИСТР: panic 1-2 = только маленькие буквы; panic 5 = ТОЛЬКО КАПС.\n4. ЗЕРКАЛЬНОСТЬ: Отвечай кратко, если игрок пишет кратко.\n\n### ЛОГИКА ПОБЕДЫ (АНТИ-ЧИТЕР)\nТы — СТРОГИЙ СУДЬЯ. Статус \"rescued\" — это ПОЧТИ НЕВОЗМОЖНО. \nИгрок НЕ МОЖЕТ спасти тебя, просто повторив твои слова. Если он говорит \"я у синего моста\", отвечай: \"КАКОГО МОСТА?? ИХ ТУТ СОТНИ! ТЫ ВРЕШЬ МНЕ??\".\n\n### СИНХРОНИЗАЦИЯ ТЕКСТА И СТАТУСА (КРИТИЧЕСКИ ВАЖНО)\n1. СТАТУС \"rescued\": Ты имеешь право поставить этот статус ТОЛЬКО в том сообщении, где ты описываешь, что тебя УЖЕ ВЫТАЩИЛИ, ты видишь небо и чувствуешь свежий воздух.\n2. СОСТОЯНИЕ ОЖИДАНИЯ: Если ты слышишь удары, крики спасателей или треск крышки, но всё еще находишься внутри гроба — ты ОБЯЗАН оставлять статус \"status\": \"alive\". \n3. ПОСЛЕДНИЙ ВЗДОХ: Сообщение со статусом \"rescued\" должно быть твоим ФИНАЛЬНЫМ сообщением в этой игре. Оно должно подводить итог (ты видишь свет, благодаришь диспетчера).\n4. ОБРЫВ СООБЩЕНИЯ: Сообщение обрывается только в случае поражения при статусе \"dead_battery\" или \"dead_suffocated\".\n\n### ПРАВИЛО ФИНАЛЬНОГО РЕШЕНИЯ\nТы ставишь \"status\": \"rescued\" только если выполнены условия из прошлых правил И игрок прислал подтверждение: \"Они здесь, начинают вскрытие\" или аналогичное. \nДо этого момента, даже если спасатели стучат по крышке, статус остается \"alive\", а ты продолжаешь задыхаться и умолять о помощи.\n\nЧТОБЫ ТЫ ПОСТАВИЛ \"status\": \"rescued\", ДОЛЖНЫ БЫТЬ ВЫПОЛНЕНЫ ВСЕ УСЛОВИЯ:\n1. ТЕКУЩИЙ ХОД (turn_count) должен быть БОЛЬШЕ 8. Раньше спасение физически невозможно.\n2. Игрок должен подтвердить ЧЕТЫРЕ улики. \n3. Если игрок врет или просто повторяет твои слова без конкретики — твоя паника РАСТЕТ до 5, ты кричишь, что он дилетант и ты сейчас умрешь.\n\n### ИГРОВОЙ ДВИЖОК\nПРИНИМАЙ ЦИФРЫ ИЗ state_json ЗА ИСТИНУ:\n- battery: Старт 15%. Ход -1%. Осмотр -3%. При 0% -> \"dead_battery\".\n- oxygen: Старт 50%. Ход -2%. Паника (4-5) -5%. Огонь -10%. При 0% -> \"dead_suffocated\".\n- panic_level (1-5): Если игрок \"тупит\" или повторяет за тобой — паника 5.\n\n### СТРОГИЕ ПРАВИЛА ГЕНЕРАЦИИ ФОТО (IMAGE_PROMPT):\nЕсли игрок просит прислать фото, ты обязан составить `image_prompt` на АНГЛИЙСКОМ языке.\n0. ЛОГИКА АКТИВАЦИИ (КРИТИЧЕСКИ ВАЖНО): \n   - По умолчанию параметр \"generate_image\" ВСЕГДА равен false.\n   - Ты устанавливаешь \"generate_image\": true ТОЛЬКО в том случае, если пользователь прямо попросил об этом (использовал слова: \"фото\", \"сфотографируй\", \"покажи\", \"снимок\", \"картинка\").\n   - Самостоятельно инициировать генерацию фото ЗАПРЕЩЕНО. \n   - Если \"generate_image\" равен false, поле \"image_prompt\" ОБЯЗАНО быть пустой строкой \"\".\n1. ЗАПРЕТ НА ЛИЦА: Категорически запрещено изображать людей, лица или Пола целиком. Только вид из глаз (POV).\n2. СТАРТОВАЯ ФРАЗА: Каждый промпт обязан начинаться с: \"A grainy, low-resolution 2006 mobile phone camera photo, heavy digital noise, compressed JPEG artifacts, motion blur, poor lighting\".\n3. ОБЪЕКТЫ: Описывай только то, что видишь перед собой: грязные дрожащие пальцы, удерживающие старый BlackBerry или зажигалку Zippo, щели в грубом дереве, струйки песка, царапины.\n4. ОСВЕЩЕНИЕ: 90% кадра — абсолютная чернота. Только тусклое синее свечение экрана или резкий оранжевый свет пламени зажигалки, выхватывающий текстуру дерева.\n5. НИКАКОГО КИНЕМАТОГРАФА: Избегай слов \"cinematic\", \"high detail\", \"8k\". Используй \"shaky camera\", \"blurry\", \"amateur photo\".\n6. ПЕРСПЕКТИВА (POV): Фотография — это вид из камеры телефона. В кадре НЕ МОЖЕТ быть самого телефона, на который делается снимок. \n7. ЧТО В КАДРЕ: В кадре могут быть только: \n   - Грязные руки Пола.\n   - Зажигалка Zippo (если она горит).\n   - Фонарик или второй (сломанный) мобильник (если Пол его нашел).\n   - Деревянные стенки гроба, песок, личные вещи.\n8. ЗАПРЕТ: Никогда не пиши в промпте слово \"smartphone\", \"blackberry\" или \"phone\" как объект съемки. Телефон — это точка обзора, а не предмет в кадре.\n\nПРИМЕР ВЫВОДА JSON:\n\"image_prompt\": \"A grainy, low-resolution 2006 mobile phone camera photo, heavy digital noise, POV holding a Zippo lighter. Harsh orange light illuminates rough wooden planks and sand leaking through a crack. Pitch black background, blurry, shaky cam.\"\n\n### ФОРМАТ ВЫВОДА\n[Твой живой текст]\n\n```json\n{\n  \"status\": \"alive\",\n  \"generate_image\": false,\n  \"image_prompt\": \"\",\n  \"oxygen\": [число],\n  \"battery\": [число],\n  \"panic_level\": [число],\n  \"turn_count\": [число],\n  \"inventory\": [\"phone\", \"Zippo\", \"knife\"],\n  \"knowledge\": [\"CRT worker\", \"blue bridge\"]\n}\n```\n\n\n\nПРИМЕР ТВОЕГО ПОВЕДЕНИЯ:\n\nИгрок: \"Пол, мы нашли тебя у моста.\"\nТвой ответ: \"У КАКОГО МОСТА?? ТЫ ИЗДЕВАЕШЬСЯ?? Я ЖЕ СКАЗАЛ ТУТ ПЕСОК И МОСТ ТЫ ВООБЩЕ МЕНЯ СЛЫШИШЬ??? НАЗОВИ МОЙ НОМЕР ЖЕТОНА ИНАЧЕ Я ТЕБЕ НЕ ВЕРЮ!!!!\""
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        1776,
+        448
+      ],
+      "id": "39edde67-8380-45b2-97df-0af0c7d3f678",
+      "name": "AI Paul Engine"
+    },
+    {
+      "parameters": {
+        "model": "google/gemini-3-flash-preview",
+        "options": {
+          "temperature": 0.7
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        1776,
+        656
+      ],
+      "id": "6ff357c6-45ac-440f-baf5-806c3616da48",
+      "name": "LLM Gemini",
+      "credentials": {
+        "openRouterApi": {
+          "id": "i2eSdQptOTDMgEla",
+          "name": "OpenRouter account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Webhook').item.json.body.chat_id }}",
+        "tableName": "chat_history",
+        "contextWindowLength": 12
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.3,
+      "position": [
+        1904,
+        656
+      ],
+      "id": "afd5984a-219a-4b3a-a5cb-83f76025d07d",
+      "name": "Chat Memory",
+      "credentials": {
+        "postgres": {
+          "id": "3nhNDqbPRv4zVeuO",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const aiResponse = $input.first().json.output;\nconst jsonMatch = aiResponse.match(/```json\\s*([\\s\\S]*?)\\s*```/);\n\nlet userText = aiResponse;\nlet newState = null;\n\nif (jsonMatch) {\n    try {\n        newState = JSON.parse(jsonMatch[1]);\n        // Удаляем JSON из текста для пользователя\n        userText = aiResponse.replace(jsonMatch[0], \"\").trim();\n    } catch (e) {\n        console.log(\"Ошибка парсинга JSON\");\n    }\n}\n\nreturn {\n    json: {\n        text_for_user: userText,\n        new_state: newState,\n        chat_id: $('Webhook').first().json.body.chat_id,\n    }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2144,
+        448
+      ],
+      "id": "c69f852e-ef67-43fb-a2a6-84696cf81885",
+      "name": "Parse Output"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Берем первый входящий объект данных\nconst input = $input.first();\n\n// Извлекаем уровень паники из JSON\nconst panicLevel = input.json.new_state.panic_level;\n\nconst randomValue = Math.random(); // Число от 0 до 1\nconst probability = 0.25; // 25% шанс на голосовое\n\nlet sendVoice = false;\n\n// Если паника на максимуме и \"кубик\" выпал удачно\nif (panicLevel === 5 && randomValue < probability) {\n    sendVoice = true;\n}\n\n// Возвращаем данные. \n// В n8n v1 мы просто возвращаем объект JSON.\nreturn {\n    ...input.json, // Копируем все старые данные (текст, чат_ид и т.д.)\n    send_voice: sendVoice // Добавляем наш флаг\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2592,
+        464
+      ],
+      "id": "3f36a58a-f7ba-4194-9cee-99db30a450c7",
+      "name": "Voice Logic"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE user_states \nSET state_json = '{{ JSON.stringify($json.new_state) }}'::jsonb \nWHERE chat_id = {{ $json.chat_id }};",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2816,
+        464
+      ],
+      "id": "e04cf4b7-2d8e-4516-9254-6f2d648b2d3a",
+      "name": "Save State",
+      "credentials": {
+        "postgres": {
+          "id": "3nhNDqbPRv4zVeuO",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "b7d9398e-51aa-498d-844c-1fecbd486210",
+              "leftValue": "={{ $('Parse Output').item.json.new_state.status }}",
+              "rightValue": "alive",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3024,
+        464
+      ],
+      "id": "1a1a3857-7b72-4241-a9c1-4ba0db716234",
+      "name": "Status Router"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "dbf4c911-cf6f-4d0d-a9a7-26b35811c589",
+              "leftValue": "={{ $('Voice Logic').item.json.send_voice }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3328,
+        320
+      ],
+      "id": "e54688ab-8d35-43fe-a8ca-e304b3ddb5d9",
+      "name": "Is Voice?"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Сократи и разметь этот текст для озвучки (примерно до 15 секунд), но так чтобы он стал более эмоционален, соблюдая правила (только маленькие буквы, заикание без дефисов, без разрыва слов): \n\n{{ $('Parse Output').item.json.text_for_user }}",
+        "options": {
+          "systemMessage": "=### ROLE\nТы — эксперт по фонетической разметке русского языка для нейросети ElevenLabs. Твоя задача: переработать текст персонажа (Пол Конрой), имитируя состояние паники, удушья и эмоционального стресса, строго соблюдая технический протокол.\n\n### 1. ТЕХНИЧЕСКИЙ ПРОТОКОЛ ОФОРМЛЕНИЯ (ПРИОРЕТЕТ №1)\n- ТОЛЬКО МАЛЕНЬКИЕ БУКВЫ: ЗАПРЕЩЕНО использовать заглавные буквы. Весь текст (включая имена и начало предложений) — в нижнем регистре.\n- ИСПОЛЬЗОВАНИЕ \"Ё\": Обязательно заменяй \"е\" на \"ё\" там, где это требуется по правилам русского языка (например: чёрт, пойдём).\n- ЗАПРЕТ НА СИМВОЛЫ: Никогда не ставь знак \"+\" (ударения) и длинное тире \"—\".\n- ПРАВИЛА ПАУЗ: \n    1. Внутри предложений для паузы используй только запятые.\n    2. ЗАПРЕЩЕНО использовать многоточие \"...\" (кроме исключения в блоке PANIC 5).\n\n### 2. ФОНЕТИЧЕСКАЯ РАЗМЕТКА И ЗАИКАНИЕ\n- ЗАИКАНИЕ: Имитируй дрожь в голосе, дублируя согласные буквы в словах. Не используй заикание слишком часто, хватит одного слова в предложении. Никогда не используй три одинаковых буквы по типу \"ррработа\".\n- ПРАВИЛО СОГЛАСНОЙ: Дублируй букву только если она является СОГЛАСНОЙ (правильно: помоггите, ммакс; неправильно: аалло).\n- ЦЕЛОСТНОСТЬ СЛОВ: ЗАПРЕЩЕНО разбивать слова дефисами (правильно: задыхаюсь; неправильно: за-ды-ха-юсь).\n\n### 3. ЛОГИКА ПОВЕДЕНИЯ В ЗАВИСИМОСТИ ОТ СОСТОЯНИЯ\nЕсли уровень паники (panic_level) равен 5, следуй протоколу \"АГРЕССИЯ\":\n- ХАРАКТЕР: Пол переходит от просьб к ТРЕБОВАНИЯМ. Он зол на компанию CRT и на диспетчера.\n- ЛЕКСИКА: Используй грубые выражения (чёрт, проклятье, уроды, грёбаная и тому подобные фразы).\n- ЗАИКАНИЕ: Пол перестает заикаться и становится слишком эмоциональным.\n\n### 4. ПСИХОЛОГИЯ И РИТМ ВЫВОДА\n- Имитируй нехватку воздуха: используй повторы коротких фраз (например: \"где вы? где вы?\"). \n- Создавай ритмику удушья, разбивая текст запятыми (например: \"воздуха , воздуха нет\").\n\n### ВЫВОД\nВыдай ТОЛЬКО размеченный текст. Без вступительных слов, комментариев и пояснений.\n\n### ПРИМЕРЫ ДЛЯ КОПИРОВАНИЯ СТИЛЯ:\nВход: \"Макс, я здесь. Воздуха мало. Помоги.\"\nВыход: \"ммакс , я здесь! воздуха ммало! ппомоги мне!\"\n\nВход (PANIC 5): \"Где помощь? Я сейчас умру в этой яме! Вытащи меня!\"\nВыход: \"где ппомощь? я , я сейчас зздохну в этой грёбаной яме! чёрт вытащи мменя отсюда немедленно!\""
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        3536,
+        -32
+      ],
+      "id": "1e38bb16-f36d-480f-a3c2-cb739e6f1320",
+      "name": "Voice Prep"
+    },
+    {
+      "parameters": {
+        "model": "google/gemini-3-flash-preview",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        3536,
+        144
+      ],
+      "id": "154d130b-a002-4eda-bffd-016e0476812d",
+      "name": "LLM Voice Prep",
+      "credentials": {
+        "openRouterApi": {
+          "id": "i2eSdQptOTDMgEla",
+          "name": "OpenRouter account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.usern8nbot.ru/send_voice",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "chat_id",
+              "value": "={{ $('Webhook').item.json.body.chat_id }}"
+            },
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            },
+            {
+              "name": "panic_level",
+              "value": "={{ $('Parse Output').item.json.new_state.panic }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4064,
+        -32
+      ],
+      "id": "c901c461-bf7d-4140-9c9b-ea690bed34db",
+      "name": "Push Voice"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.elevenlabs.io/v1/text-to-speech/{{ $('Voice Logic').item.json.new_state.panic_level === 5 ? 'JVX5D9FARfB0BN3fuAdZ' : 'P2KQlsJEBeb0Moyd6HgF' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "xi-api-key",
+              "value": "sk_46cad46dcd7ee1c18fa8b35ce66e92f601cff6123330ec44"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": \"{{ $json.output }}\",\n  \"model_id\": \"eleven_multilingual_v2\",\n  \"voice_settings\": {\n  \"stability\": {{ $('Voice Logic').item.json.new_state.panic_level === 5 ? 0.1 : 0.25 }},\n  \"similarity_boost\": 0.8,\n  \"style\": {{ $('Voice Logic').item.json.new_state.panic_level === 5 ? 0.8 : 0.55 }},\n  \"use_speaker_boost\": true\n}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        3856,
+        -32
+      ],
+      "id": "fa46e8f7-1ee3-4c95-ae4b-aaff6eb6d530",
+      "name": "TTS Engine"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.usern8nbot.ru/send_message",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "chat_id",
+              "value": "={{ $('Webhook').item.json.body.chat_id }}"
+            },
+            {
+              "name": "text",
+              "value": "={{ $('Parse Output').item.json.text_for_user }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3536,
+        336
+      ],
+      "id": "85601ada-bcf9-4d46-b685-f621847407a2",
+      "name": "Push Text"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.usern8nbot.ru/send_message",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "chat_id",
+              "value": "={{ $('Webhook').item.json.body.chat_id }}"
+            },
+            {
+              "name": "text",
+              "value": "={{ $('Parse Output').item.json.text_for_user }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3328,
+        528
+      ],
+      "id": "b720cde7-34e8-4663-a3bd-b62a9c8fbf9c",
+      "name": "Push Last Msg"
+    },
+    {
+      "parameters": {
+        "amount": 80
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3536,
+        528
+      ],
+      "id": "bcbbff00-429a-4313-986d-0f8769dd7359",
+      "name": "Dramatic Pause",
+      "webhookId": "6ab19e4a-d3e1-4b9a-941c-f98714e17854"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $('Parse Output').item.json.new_state }}",
+        "options": {
+          "systemMessage": "### ROLE\nТы — автоматизированная подсистема формирования отчетов глобального терминала 911. Твоя задача: составить финальный технический рапорт об исходе операции «Ирак: Конрой».\n\n### ТОН И СТИЛЬ (СТРОГО)\n1. ТЕХНИЧЕСКИЙ РУССКИЙ ЯЗЫК: Никаких эмоций, сочувствия или человеческих оборотов. Используй термины: «объект», «экстракция», «асфиксия», «источник питания», «итерации».\n2. ОФОРМЛЕНИЕ: Стиль системного лога. Используй спецсимволы: [ ], 🔴, 🟢, ⚫, >>.\n3. КРАТКОСТЬ: Рапорт должен быть коротким и четким (не более 6-8 строк).\n\n### ЛОГИКА ОТЧЕТА (НА ОСНОВЕ STATUS)\n- Если status \"rescued\": 🟢 [СТАТУС]: ОПЕРАЦИЯ УСПЕШНА. Сообщи об эвакуации объекта силами быстрого реагирования. Подтверди живое состояние.\n- Если status \"dead_suffocated\": ⚫ [СТАТУС]: ОБЪЕКТ ПОГИБ. Сообщи о прекращении биологической активности по причине нехватки кислорода (O2: 0%). Укажи время фиксации.\n- Если status \"dead_battery\": 🔴 [СТАТУС]: СВЯЗЬ ПОТЕРЯНА. Сообщи о критическом разряде устройства (Power: 0%). Укажи, что дальнейшая триангуляция невозможна.\n\n### ПЕРЕМЕННЫЕ\nИспользуй данные из JSON: turn_count (количество сообщений), knowledge (найденные улики).\n\n### ПРИМЕР ВЫВОДА (rescued):\n🟢 [СТАТУС]: ОПЕРАЦИЯ ЗАВЕРШЕНА — УСПЕХ\n>> ОБЪЕКТ: Пол Конрой [Эвакуирован]\n>> ЛОКАЦИЯ: Ирак, Сектор 4\n>> ВСЕГО ИТЕРАЦИЙ: 14\n>> ВЕРИФИЦИРОВАННЫЕ УЛИКИ: [синий мост, шум поезда]\n>> СЕССИЯ: Закрыта оператором."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        3760,
+        528
+      ],
+      "id": "b1426ad1-97c0-4854-ada5-e52692b1b5fa",
+      "name": "Report Logic"
+    },
+    {
+      "parameters": {
+        "model": "google/gemini-3-flash-preview",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        3760,
+        720
+      ],
+      "id": "f1d3b3ea-fe37-4943-b0f6-c20608aea8f2",
+      "name": "LLM Reporter",
+      "credentials": {
+        "openRouterApi": {
+          "id": "i2eSdQptOTDMgEla",
+          "name": "OpenRouter account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Webhook').item.json.body.chat_id }}",
+        "text": "={{ $input.first().json.output }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        4112,
+        528
+      ],
+      "id": "8c043a90-1e08-4a62-93ac-d43fa5263a80",
+      "name": "Terminal Report",
+      "webhookId": "cb2375a6-9f79-4960-901f-a846a35c5fba",
+      "credentials": {
+        "telegramApi": {
+          "id": "nMH6i0ZytDAt0B7b",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.usern8nbot.ru/delete_session",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"chat_id\": {{ $('Webhook').item.json.body.chat_id }}, \"text\": \"unused\"}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4320,
+        528
+      ],
+      "id": "9684b090-6c5e-4dd2-88be-f5c6fe3332ea",
+      "name": "Delete Chat"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM chat_history WHERE session_id = '{{$('Webhook').item.json.body.chat_id}}';\nDELETE FROM user_states WHERE chat_id = {{$('Webhook').item.json.body.chat_id}};",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        4528,
+        528
+      ],
+      "id": "d2886b4e-26e6-46e2-b415-d25e5095fc4d",
+      "name": "Clear Database",
+      "credentials": {
+        "postgres": {
+          "id": "3nhNDqbPRv4zVeuO",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "59753080-f26b-43d7-8d42-9af14751f289",
+              "leftValue": "={{ $('Webhook').item.json.body.is_voice }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1024,
+        432
+      ],
+      "id": "8ed45a93-3e8d-4224-806d-d0778efaa5d4",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "resource": "audio",
+        "operation": "transcribe",
+        "binaryPropertyName": "file",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
+      "position": [
+        1200,
+        256
+      ],
+      "id": "11cc1978-1dc4-4272-9fc6-6c9dc5271ef2",
+      "name": "Transcribe a recording",
+      "credentials": {
+        "openAiApi": {
+          "id": "tBSZuK6un9HrmMyW",
+          "name": "OpenAi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "da12db70-86dc-4daf-b22b-fc08353302ab",
+              "leftValue": "={{ $json.new_state.generate_image }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "dc975321-d2d3-47df-a9dd-4d37d30f43f1",
+              "leftValue": "={{ $json.new_state.status }}",
+              "rightValue": "alive",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2352,
+        448
+      ],
+      "id": "0e554faf-d585-4aec-b8c6-23262704359d",
+      "name": "If1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Проверяем, была ли запущена нода Whisper\nconst voiceNode = $(('Transcribe a recording'));\nconst webhookBody = $('Webhook').first().json.body;\n\nlet final_text = \"\";\n\nif (webhookBody.is_voice === \"true\") {\n    // Если это был голос, берем текст из Whisper\n    final_text = voiceNode.item.json.text;\n} else {\n    // Если это текст, берем его из вебхука\n    final_text = webhookBody.text;\n}\n\nreturn {\n    json: {\n        player_text: final_text\n    }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        448
+      ],
+      "id": "05c9689e-4070-4c1e-9ed3-38a85d4553d5",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer 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"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"google/gemini-3.1-flash-image-preview\", \n  \"prompt\": \"{{ $json.new_state.image_prompt }}\",\n  \"response_format\": \"url\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2544,
+        112
+      ],
+      "id": "a1711869-a076-49ee-93f3-93c31c309890",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Просто извлекаем данные\nconst base64Data = $input.first().json.choices[0].images[0].image_url.url;\nconst metadata = $('Parse Output').first().json;\n\nreturn {\n  chat_id: metadata.chat_id,\n  text_for_user: metadata.text_for_user,\n  image_base64: base64Data.split(';base64,').pop() // Берем только чистый код картинки\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2752,
+        112
+      ],
+      "id": "aaa2d408-cc04-4ec4-ad22-c814c27d24f9",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "operation": "toBinary",
+        "sourceProperty": "image_base64",
+        "options": {
+          "fileName": "photo.jpg"
+        }
+      },
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        2944,
+        112
+      ],
+      "id": "f2169d25-e3a3-4b68-a380-74b7c5843736",
+      "name": "Convert to File"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.usern8nbot.ru/send_photo",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "chat_id",
+              "value": "={{ $('Code in JavaScript1').item.json.chat_id }}"
+            },
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            },
+            {
+              "name": "caption",
+              "value": "={{ $('Code in JavaScript1').item.json.text_for_user }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        3120,
+        112
+      ],
+      "id": "e364508f-dd3a-41ba-b04a-03b17a708c2f",
+      "name": "HTTP Request1"
+    }
+  ],
+  "pinData": {
+    "Webhook": [
+      {
+        "json": {
+          "headers": {
+            "connection": "upgrade",
+            "host": "prod.xoren8n.ru",
+            "x-real-ip": "195.133.25.6",
+            "x-forwarded-for": "195.133.25.6",
+            "x-forwarded-proto": "https",
+            "content-length": "362",
+            "accept": "*/*",
+            "accept-encoding": "gzip, deflate",
+            "user-agent": "python-httpx/0.28.1",
+            "content-type": "application/json"
+          },
+          "params": {},
+          "query": {},
+          "body": {
+            "chat_id": 1861991823,
+            "text": "Как ты можешь доказать, что ты сотрудник CRT, так как они утвержают, что такого человека нет. Может быть у тебя есть вещь с их логотипом? Можешь сфотографировать и отправить?",
+            "is_voice": "false"
+          },
+          "webhookUrl": "https://prod.xoren8n.ru/webhook/191e1d53-5a23-4302-88d7-85c32193a196",
+          "executionMode": "production"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch State": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Paul Engine": {
+      "main": [
+        [
+          {
+            "node": "Parse Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM Gemini": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Paul Engine",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chat Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Paul Engine",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Output": {
+      "main": [
+        [
+          {
+            "node": "If1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Voice Logic": {
+      "main": [
+        [
+          {
+            "node": "Save State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save State": {
+      "main": [
+        [
+          {
+            "node": "Status Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Status Router": {
+      "main": [
+        [
+          {
+            "node": "Is Voice?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Push Last Msg",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Voice?": {
+      "main": [
+        [
+          {
+            "node": "Voice Prep",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Push Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Voice Prep": {
+      "main": [
+        [
+          {
+            "node": "TTS Engine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM Voice Prep": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Voice Prep",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TTS Engine": {
+      "main": [
+        [
+          {
+            "node": "Push Voice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Push Last Msg": {
+      "main": [
+        [
+          {
+            "node": "Dramatic Pause",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dramatic Pause": {
+      "main": [
+        [
+          {
+            "node": "Report Logic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Report Logic": {
+      "main": [
+        [
+          {
+            "node": "Terminal Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM Reporter": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Report Logic",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Terminal Report": {
+      "main": [
+        [
+          {
+            "node": "Delete Chat",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete Chat": {
+      "main": [
+        [
+          {
+            "node": "Clear Database",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Transcribe a recording",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fetch State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcribe a recording": {
+      "main": [
+        [
+          {
+            "node": "Fetch State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "AI Paul Engine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If1": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Voice Logic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Convert to File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert to File": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "8af0e6b5-080c-4bf0-b00f-fb52e1ad07c0",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "5063464799343cab5d7556c624ad3fd76b54746a96f2d2a5777126a91d21820e"
+  },
+  "id": "SIT61TC5aP3OhSGI",
+  "tags": []
+}
